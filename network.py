@@ -31,7 +31,7 @@ def first_layer_sine_init(m):
 
 
 class DepthNerf(torch.nn.Module):
-    def __init__(self, num_encoding_functions, sine_activation=True, args=None, out_ch=1, factor=10):
+    def __init__(self, num_encoding_functions, sine_activation=True, args=None, out_ch=1, factor=10, time_dim=0):
         super(DepthNerf, self).__init__()
         filter_size = args.filter_size
         self.num_encoding = num_encoding_functions
@@ -41,7 +41,7 @@ class DepthNerf(torch.nn.Module):
 
         dimension_factor = 2
         self.depth = nn.Sequential(
-            nn.Linear(dimension_factor * (2 * self.num_encoding + 1), filter_size),
+            nn.Linear(dimension_factor * (2 * self.num_encoding + 1) + time_dim, filter_size),
             act_fn,
             lin_func(filter_size, filter_size),
             act_fn,

@@ -25,9 +25,16 @@ def prep_data_for_training(data_loader, args):
     shade_maps = torch.empty((len(data_loader), args.h, args.w), device=args.dev)
     img_maps = torch.empty((len(data_loader), 3, args.h, args.w), device=args.dev)
 
+    if args.time:
+        time_steps = torch.empty((len(data_loader), 1), device=args.dev)
+
     # load all images and light sources into memory
     for jj in train_loader_idx:
-        target_img, target_light_src, target_shadow = data_loader[jj]
+        if args.time:
+            target_img, target_light_src, target_shadow, target_time_step = data_loader[jj]
+            time_steps[jj] = target_time_step.to(args.dev)
+        else:
+            target_img, target_light_src, target_shadow = data_loader[jj]
         light_sources_xyz[jj] = target_light_src.to(args.dev)
         shade_maps[jj] = target_shadow.to(args.dev)
         img_maps[jj] = target_img.to(args.dev)
@@ -35,7 +42,10 @@ def prep_data_for_training(data_loader, args):
     img_mean = img_maps.mean(dim=0)
     del img_maps
 
-    return shade_maps, light_sources_xyz, img_mean
+    if args.time:
+        return shade_maps, light_sources_xyz, img_mean, time_steps
+    else:
+        return shade_maps, light_sources_xyz, img_mean
 
 
 def lights_in_frustrum(data_loader, light_sources_uv, light_sources_xyz, args):
@@ -71,7 +81,11 @@ def run(args, task_name):
     args.w, args.h = w, h
 
     focal_length = data_loader.params["focal_length"]
-    shade_maps, light_sources_xyz, img_mean = prep_data_for_training(data_loader, args)
+
+    if args.time:
+        shade_maps, light_sources_xyz, img_mean, time_steps = prep_data_for_training(data_loader, args)
+    else:
+        shade_maps, light_sources_xyz, img_mean = prep_data_for_training(data_loader, args)
 
     K_hom = get_camera_intrinsics(w, h, focal_length).to(args.dev)
     K = K_hom[:, :3, :3]
@@ -83,7 +97,7 @@ def run(args, task_name):
 
     factor = data_loader.depth_exr.max()  # initialize model with maximum depth
     num_encoding_functions = args.num_enc_functions
-    depth_nerf = DepthNerf(num_encoding_functions, factor=factor, args=args)
+    depth_nerf = DepthNerf(num_encoding_functions, factor=factor, args=args, time_dim=6 if args.time else 0)
     if args.mixed:
         depth_nerf = depth_nerf.cuda()
 
@@ -107,9 +121,19 @@ def run(args, task_name):
     # generate all positional encoded points for NeRF input
     mesh_query_points = (get_ray_bundle(h, w, normalize=True).reshape((-1, 2))).to(args.dev)
 
-    all_depth_coords_encoded = [positional_encoding(mesh_query_points[jj, :], num_encoding_functions=num_encoding_functions)
-        for jj in range(w * h)]
+    all_depth_coords_encoded = [
+        positional_encoding(mesh_query_points[jj, :], num_encoding_functions=num_encoding_functions)
+        for jj in range(w * h)
+    ]
     all_depth_coords_encoded = torch.stack(all_depth_coords_encoded).to(args.dev)
+
+    if args.time:
+        #breakpoint()
+        all_time_steps_encoded = positional_encoding(
+            time_steps,
+            include_input=False,
+            num_encoding_functions=3,
+        ).to(args.dev)
 
     # pre-calculate and cache all lines for sampling the predicted depth, since these are expensive calculations
     def pre_gen_lines_arr(boundary_subsampling_factor, xyz):
@@ -146,11 +170,21 @@ def run(args, task_name):
 
     def train_single_light_src(light_idx, depth_nerf, optimizer, running_loss):
         shadow_hat = torch.zeros_like(depth_map, device=args.dev, dtype=torch.float32)
-        noise = torch.randn_like(all_depth_coords_encoded) * 0.0001
-        if args.mixed:
-            depth_hat = depth_nerf((all_depth_coords_encoded + noise).cuda()).reshape(w, h).cpu()
+
+        if args.time:
+            time_step = all_time_steps_encoded[light_idx].unsqueeze(0).repeat(all_depth_coords_encoded.shape[0], 1)
+            depth_input = torch.cat([all_depth_coords_encoded, time_step], -1)
+            noise = torch.randn_like(depth_input) * 0.0001
+            depth_input = depth_input + noise
         else:
-            depth_hat = depth_nerf((all_depth_coords_encoded + noise)).reshape(w, h)
+            noise = torch.randn_like(all_depth_coords_encoded) * 0.0001
+            depth_input = all_depth_coords_encoded + noise
+        #breakpoint()
+
+        if args.mixed:
+            depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).cpu()
+        else:
+            depth_hat = depth_nerf(depth_input).reshape(w, h)
 
         xyz = depth_map_to_pointcloud(depth_hat, K, RT, w, h).unsqueeze(0).permute(0, 3, 1, 2)
 
@@ -333,12 +367,22 @@ def run(args, task_name):
         # re-generate lines
         if (not args.boundary_sampling and iter % 100 == 0) or \
                     (args.boundary_sampling and iter in iter_sampling_pairs.keys()):
-            noise = torch.randn_like(all_depth_coords_encoded) * 0.0001
 
-            if args.mixed:
-                depth_hat = depth_nerf((all_depth_coords_encoded + noise).cuda()).reshape(w, h).to("cpu")
+            if args.time:
+                time_offset = all_time_steps_encoded.mean(0).unsqueeze(0).repeat(all_depth_coords_encoded.shape[0], 1)
+                #depth_input = torch.cat([all_depth_coords_encoded, time_offset], -1)
+                depth_input = torch.cat([all_depth_coords_encoded, torch.zeros_like(time_offset)], -1)
+                noise = torch.randn_like(depth_input) * 0.0001
+                depth_input = depth_input + noise
             else:
-                depth_hat = depth_nerf((all_depth_coords_encoded + noise)).reshape(w, h)
+                noise = torch.randn_like(all_depth_coords_encoded) * 0.0001
+                depth_input = all_depth_coords_encoded + noise
+
+            #breakpoint()
+            if args.mixed:
+                depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).to("cpu")
+            else:
+                depth_hat = depth_nerf(depth_input).reshape(w, h)
 
             xyz = depth_map_to_pointcloud(depth_hat, K, RT, w, h).unsqueeze(0).permute(0, 3, 1, 2)
 
@@ -363,16 +407,27 @@ def run(args, task_name):
 
         # every X iterations, print error between GT depth and predicted depth
         if iter % 50 == 0:
-            if args.mixed:
-                depth_hat = depth_nerf(all_depth_coords_encoded.cuda()).reshape(w, h).cpu()
+            if args.time:
+                time_offset = all_time_steps_encoded.mean(0).unsqueeze(0).repeat(all_depth_coords_encoded.shape[0], 1)
+                #depth_input = torch.cat([all_depth_coords_encoded, time_offset], -1)
+                depth_input = torch.cat([all_depth_coords_encoded, torch.zeros_like(time_offset)], -1)
+                noise = torch.randn_like(depth_input) * 0.0001
+                depth_input = depth_input + noise
             else:
-                depth_hat = depth_nerf(all_depth_coords_encoded).reshape(w, h)
+                noise = torch.randn_like(all_depth_coords_encoded) * 0.0001
+                depth_input = all_depth_coords_encoded + noise
+
+            if args.mixed:
+                depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).cpu()
+            else:
+                depth_hat = depth_nerf(depth_input).reshape(w, h)
             test(depth_hat, writer)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Description of your program')
     parser.add_argument('-o', '--object', help='Description ', default='cactus')
+    parser.add_argument('-t', '--time', help='use time encoding', action='store_true')
     parser.add_argument('--speed', help='fast, medium or slow ', default='fast')
     parser.add_argument('-lr', '--learning_rate', help='Description ', default=5e-5)
     parser.add_argument('-d', '--dev', help='device: cpu, cuda or mixed', required=False, default='mixed')
