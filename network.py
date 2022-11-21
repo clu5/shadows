@@ -41,7 +41,7 @@ class DepthNerf(torch.nn.Module):
 
         dimension_factor = 2
         self.depth = nn.Sequential(
-            nn.Linear(dimension_factor * (2 * self.num_encoding + 1) + time_dim, filter_size),
+            nn.Linear(dimension_factor * (2 * self.num_encoding + 1), filter_size),
             act_fn,
             lin_func(filter_size, filter_size),
             act_fn,
@@ -55,9 +55,29 @@ class DepthNerf(torch.nn.Module):
             act_fn,
         )
 
+        if time_dim != 0:
+            self.time = nn.Sequential(
+                nn.Linear(out_ch + time_dim, filter_size),
+                act_fn,
+                lin_func(filter_size, filter_size),
+                act_fn,
+                lin_func(filter_size, filter_size),
+                act_fn,
+                nn.Linear(filter_size, out_ch, bias=True),
+                act_fn,
+            )
+
         self.depth.apply(sine_init)
         self.depth[0].apply(first_layer_sine_init)
+        if time_dim != 0:
+            self.time.apply(sine_init)
+            self.time[0].apply(first_layer_sine_init)
 
-    def forward(self, pos_enc):
-        res = self.depth(pos_enc).squeeze() * self.factor.abs()
+    def forward(self, pos_enc, time_enc=None):
+        #res = self.depth(pos_enc).squeeze() * self.factor.abs()
+        res = self.depth(pos_enc)
+        #breakpoint()
+        if time_enc is not None:
+            res = self.time(torch.cat([res, time_enc], -1))
+        res = res.squeeze() * self.factor.abs()
         return res.abs()

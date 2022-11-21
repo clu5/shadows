@@ -115,7 +115,7 @@ class ShadowDataset(data.Dataset):
 
         light_dir = torch.from_numpy(self.light_dir[img_name]).float().to(dev)
 
-        if self.args.time:
+        if self.args.time_enc:
             time_step = torch.tensor(int(img_name.split('_')[-1])).float().to(dev)
             return img, light_dir, shadow, time_step
         else:
