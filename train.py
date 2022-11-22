@@ -175,19 +175,14 @@ def run(args, task_name):
         depth_input = all_depth_coords_encoded + noise
         if args.time_enc:
             time_input = all_time_steps_encoded[light_idx].unsqueeze(0).repeat(all_depth_coords_encoded.shape[0], 1)
+            depth_input = torch.cat([all_depth_coords_encoded, time_input], -1)
 
         #breakpoint()
 
         if args.mixed:
-            if args.time_enc:
-                depth_hat = depth_nerf(depth_input.cuda(), time_enc=time_input.cuda()).reshape(w, h).cpu()
-            else:
-                depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).cpu()
+            depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).cpu()
         else:
-            if args.time_enc:
-                depth_hat = depth_nerf(depth_input, time_enc=time_input).reshape(w, h)
-            else:
-                depth_hat = depth_nerf(depth_input).reshape(w, h)
+            depth_hat = depth_nerf(depth_input).reshape(w, h)
 
         xyz = depth_map_to_pointcloud(depth_hat, K, RT, w, h).unsqueeze(0).permute(0, 3, 1, 2)
 
@@ -375,18 +370,14 @@ def run(args, task_name):
             depth_input = all_depth_coords_encoded + noise
 
             if args.time_enc:
-                zeros = torch.zeros((all_depth_coords_encoded.shape[0], all_time_steps_encoded.shape[1]))
+                time_input = all_time_steps_encoded[0].unsqueeze(0).repeat(all_depth_coords_encoded.shape[0], 1)
+                depth_input = torch.cat([all_depth_coords_encoded, time_input], -1)
 
+            #breakpoint()
             if args.mixed:
-                if args.time_enc:
-                    depth_hat = depth_nerf(depth_input.cuda(), time_enc=zeros.cuda()).reshape(w, h).to("cpu")
-                else:
-                    depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).to("cpu")
+                depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).to("cpu")
             else:
-                if args.time_enc:
-                    depth_hat = depth_nerf(depth_input, time_enc=zeros).reshape(w, h)
-                else:
-                    depth_hat = depth_nerf(depth_input).reshape(w, h)
+                depth_hat = depth_nerf(depth_input).reshape(w, h)
 
             xyz = depth_map_to_pointcloud(depth_hat, K, RT, w, h).unsqueeze(0).permute(0, 3, 1, 2)
 
@@ -415,18 +406,13 @@ def run(args, task_name):
             depth_input = all_depth_coords_encoded + noise
 
             if args.time_enc:
-                zeros = torch.zeros((all_depth_coords_encoded.shape[0], all_time_steps_encoded.shape[1]))
+                time_input = all_time_steps_encoded[0].unsqueeze(0).repeat(all_depth_coords_encoded.shape[0], 1)
+                depth_input = torch.cat([all_depth_coords_encoded, time_input], -1)
 
             if args.mixed:
-                if args.time_enc:
-                    depth_hat = depth_nerf(depth_input.cuda(), time_enc=zeros.cuda()).reshape(w, h).to("cpu")
-                else:
-                    depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).to("cpu")
+                depth_hat = depth_nerf(depth_input.cuda()).reshape(w, h).to("cpu")
             else:
-                if args.time_enc:
-                    depth_hat = depth_nerf(depth_input, time_enc=zeros).reshape(w, h)
-                else:
-                    depth_hat = depth_nerf(depth_input).reshape(w, h)
+                depth_hat = depth_nerf(depth_input).reshape(w, h)
 
             test(depth_hat, writer)
 
