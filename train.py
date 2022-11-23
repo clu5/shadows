@@ -20,13 +20,15 @@ import time
 
 
 def prep_data_for_training(data_loader, args):
-    train_loader_idx = np.arange(len(data_loader))
-    light_sources_xyz = torch.empty((len(data_loader), 3), device=args.dev)
-    shade_maps = torch.empty((len(data_loader), args.h, args.w), device=args.dev)
-    img_maps = torch.empty((len(data_loader), 3, args.h, args.w), device=args.dev)
+    n = 1 if args.static else len(data_loader)
+
+    train_loader_idx = np.arange(n)
+    light_sources_xyz = torch.empty((n, 3), device=args.dev)
+    shade_maps = torch.empty((n, args.h, args.w), device=args.dev)
+    img_maps = torch.empty((n, 3, args.h, args.w), device=args.dev)
 
     if args.time_enc:
-        time_steps = torch.empty((len(data_loader), 1), device=args.dev)
+        time_steps = torch.empty((n, 1), device=args.dev)
 
     # load all images and light sources into memory
     for jj in train_loader_idx:
@@ -38,6 +40,9 @@ def prep_data_for_training(data_loader, args):
         light_sources_xyz[jj] = target_light_src.to(args.dev)
         shade_maps[jj] = target_shadow.to(args.dev)
         img_maps[jj] = target_img.to(args.dev)
+
+        if args.static:
+            break
 
     img_mean = img_maps.mean(dim=0)
     del img_maps
@@ -55,7 +60,9 @@ def lights_in_frustrum(data_loader, light_sources_uv, light_sources_xyz, args):
 
     lightsrc_in_frustrum = (light_sources_xyz[..., 2] > cam_location_z)
 
-    for light_idx in range(len(data_loader)):
+    n = 1 if args.static else len(data_loader)
+
+    for light_idx in range(n):
         curr_light_sources_vu = light_sources_vu[light_idx]
         light_src_in_frame = (0 <= curr_light_sources_vu[1] <= args.w) and (0 <= curr_light_sources_vu[0] <= args.h)
         lightsrc_in_frustrum[light_idx] *= (not light_src_in_frame)
@@ -77,6 +84,7 @@ def run(args, task_name):
     writer = SummaryWriter(task_name_)
 
     data_loader = ShadowDataset(root=os.path.join(args.data_path, args.object), args=args, normalize_lights=False)
+
     c, h, w = data_loader[0][0].shape
     args.w, args.h = w, h
 
@@ -97,7 +105,7 @@ def run(args, task_name):
 
     factor = data_loader.depth_exr.max()  # initialize model with maximum depth
     num_encoding_functions = args.num_enc_functions
-    depth_nerf = DepthNerf(num_encoding_functions, factor=factor, args=args, time_dim=6 if args.time_enc else 0)
+    depth_nerf = DepthNerf(num_encoding_functions, factor=factor, args=args, time_dim=2 if args.time_enc else 0)
     if args.mixed:
         depth_nerf = depth_nerf.cuda()
 
@@ -132,7 +140,7 @@ def run(args, task_name):
         all_time_steps_encoded = positional_encoding(
             time_steps,
             include_input=False,
-            num_encoding_functions=3,
+            num_encoding_functions=1,
         ).to(args.dev)
 
     # pre-calculate and cache all lines for sampling the predicted depth, since these are expensive calculations
@@ -421,6 +429,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Description of your program')
     parser.add_argument('-o', '--object', help='Description ', default='cactus')
     parser.add_argument('-t', '--time_enc', help='use time encoding', action='store_true')
+    parser.add_argument('-s', '--static', help='use single light source', action='store_true')
     parser.add_argument('--speed', help='fast, medium or slow ', default='fast')
     parser.add_argument('-lr', '--learning_rate', help='Description ', default=5e-5)
     parser.add_argument('-d', '--dev', help='device: cpu, cuda or mixed', required=False, default='mixed')
