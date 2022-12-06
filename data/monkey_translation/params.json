@@ -1,0 +1,16 @@
+{
+  "focal_length": 177.7,
+  "focal_length_real": 20,
+  "cam_location_x": 0.0,
+  "cam_location_y": 0.0,
+  "cam_location_z": 1.0,
+  "box_x_y_z": [0,0,0],
+  "scale": [0.5, 0.5, 0.5],
+  "monkey_00": [0, 0.0, 0],
+  "moneky_01": [0, 0.2, 0],
+  "monkey_02": [0, 0.4, 0],
+  "moneky_03": [0, 0.2, 0],
+  "monkey_04": [0, 0.0, 0],
+  "moneky_05": [0, -0.2, 0]
+}
+
