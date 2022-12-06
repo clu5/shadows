@@ -97,6 +97,8 @@ class ShadowDataset(data.Dataset):
     def _read_list(list_path):
         with open(list_path) as f:
             lists = f.read().splitlines()
+        #n = len(lists) // 2
+        #lists = lists[:1]
         return lists
 
     def __getitem__(self, index):

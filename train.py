@@ -105,7 +105,7 @@ def run(args, task_name):
 
     factor = data_loader.depth_exr.max()  # initialize model with maximum depth
     num_encoding_functions = args.num_enc_functions
-    depth_nerf = DepthNerf(num_encoding_functions, factor=factor, args=args, time_dim=2 if args.time_enc else 0)
+    depth_nerf = DepthNerf(num_encoding_functions, factor=factor, args=args, time_dim=len(data_loader) if args.time_enc else 0)
     if args.mixed:
         depth_nerf = depth_nerf.cuda()
 
@@ -129,6 +129,7 @@ def run(args, task_name):
     # generate all positional encoded points for NeRF input
     mesh_query_points = (get_ray_bundle(h, w, normalize=True).reshape((-1, 2))).to(args.dev)
 
+    #breakpoint()
     all_depth_coords_encoded = [
         positional_encoding(mesh_query_points[jj, :], num_encoding_functions=num_encoding_functions)
         for jj in range(w * h)
@@ -136,12 +137,13 @@ def run(args, task_name):
     all_depth_coords_encoded = torch.stack(all_depth_coords_encoded).to(args.dev)
 
     if args.time_enc:
-        #breakpoint()
-        all_time_steps_encoded = positional_encoding(
+        old_all_time_steps_encoded = positional_encoding(
             time_steps,
             include_input=False,
-            num_encoding_functions=1,
+            num_encoding_functions=num_encoding_functions+1,
         ).to(args.dev)
+        all_time_steps_encoded = torch.eye(len(time_steps))
+        #breakpoint()
 
     # pre-calculate and cache all lines for sampling the predicted depth, since these are expensive calculations
     def pre_gen_lines_arr(boundary_subsampling_factor, xyz):
@@ -445,7 +447,7 @@ if __name__ == "__main__":
 
     args_ = parser.parse_args()
 
-    task_name_ = f"{args_.object} LR={args_.learning_rate} dev={args_.dev} time_enc={args_.time_enc}"
+    task_name_ = f"{args_.object} LR={args_.learning_rate} dev={args_.dev} time_enc={args_.time_enc} static={args_.static}"
     task_name_ = task_name_.replace(" ", "_")
 
     if args_.dev == "mixed":
